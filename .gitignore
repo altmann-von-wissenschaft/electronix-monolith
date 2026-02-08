@@ -1,0 +1,68 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.builds
+*.pidb
+*.log
+*.scc
+
+# Build results
+[Dd]ebug/
+[Rr]elease/
+[Bb]in/
+[Oo]bj/
+*.pdb
+*.ilk
+*.cache
+*.ncb
+*.res
+*.aps
+*.pch
+*.ipch
+*.idb
+*.iobj
+*.tlog
+*.lastbuildstate
+*.tds
+*.woff
+
+# NuGet packages
+packages/
+*.nupkg
+*.snupkg
+
+# Temporary files
+*.tmp
+*.~*
+
+# Editor-specific files
+# Visual Studio Code
+.vscode/
+
+# Rider
+.idea/
+
+# DotNet tools
+.config/
+.toolstmp/
+
+# Test results
+TestResults/
+
+# User secrets
+appsettings.Development.json
+appsettings.Production.json
+appsettings.Staging.json
+appsettings.Local.json
+*.usersecrets
+
+# Other
+Thumbs.db
+Desktop.ini
+
+#OpenSSL
+openssl.cnf
+/certs
