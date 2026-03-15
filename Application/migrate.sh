@@ -1,5 +1,9 @@
 #!/bin/bash
 
-dotnet ef database update --context IdentityDbContext
-dotnet ef database update --context CatalogDbContext
-dotnet ef database update --context SalesDbContext
+# Migrate all module databases
+dotnet ef database update --context UsersDbContext
+dotnet ef database update --context ProductsDbContext
+dotnet ef database update --context OrdersDbContext
+dotnet ef database update --context CartDbContext
+dotnet ef database update --context ReviewsDbContext
+dotnet ef database update --context SupportDbContext

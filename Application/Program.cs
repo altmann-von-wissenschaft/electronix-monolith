@@ -1,22 +1,45 @@
-using Infrastructure.Catalog;
-using Infrastructure.Identity;
-using Infrastructure.Sales;
+using Application;
+using Application.Services;
+using Infrastructure.Contexts;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi;
+using Microsoft.OpenApi.Models;
+using Minio;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.WebHost.UseUrls("http://*:80");
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddControllers();
-builder.Services.AddDbContext<IdentityDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
-builder.Services.AddDbContext<CatalogDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
-builder.Services.AddDbContext<SalesDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+
+var connectionString = builder.Configuration.GetConnectionString("Default");
+
+builder.Services.AddDbContext<UsersDbContext>(options =>
+    options.UseNpgsql(connectionString, x => x.MigrationsHistoryTable("__EFMigrationsHistory", "users")));
+
+builder.Services.AddDbContext<ProductsDbContext>(options =>
+    options.UseNpgsql(connectionString, x => x.MigrationsHistoryTable("__EFMigrationsHistory", "products")));
+
+builder.Services.AddDbContext<OrdersDbContext>(options =>
+    options.UseNpgsql(connectionString, x => x.MigrationsHistoryTable("__EFMigrationsHistory", "orders")));
+
+builder.Services.AddDbContext<CartDbContext>(options =>
+    options.UseNpgsql(connectionString, x => x.MigrationsHistoryTable("__EFMigrationsHistory", "cart")));
+
+builder.Services.AddDbContext<ReviewsDbContext>(options =>
+    options.UseNpgsql(connectionString, x => x.MigrationsHistoryTable("__EFMigrationsHistory", "reviews")));
+
+builder.Services.AddDbContext<SupportDbContext>(options =>
+    options.UseNpgsql(connectionString, x => x.MigrationsHistoryTable("__EFMigrationsHistory", "support")));
+
+// Register services
+builder.Services.AddScoped<AuthService>();
+builder.Services.AddHttpClient<ProductsService>();
+builder.Services.AddHttpClient<OrdersService>();
+
+// Add HttpClientFactory for inter-module communication
+builder.Services.AddHttpClient();
 
 builder.Services.AddSwaggerGen(options =>
 {
@@ -31,19 +54,30 @@ builder.Services.AddSwaggerGen(options =>
     {
         Description = "JWT Authorization",
         Name = "Authorization",
-        Type = SecuritySchemeType.OAuth2,
         In = ParameterLocation.Header,
         Scheme = "Bearer"
     });
 
-    options.AddSecurityRequirement(document => 
-        new OpenApiSecurityRequirement()
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement()
     {
-        [new OpenApiSecuritySchemeReference("OAuth2", document)] = []
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                },
+                Scheme = "oauth2",
+                Name = "Bearer",
+                In = ParameterLocation.Header
+            }, 
+            new List<string>()
+        }
     });
 });
 
-/*builder.Services.AddAuthentication(x =>
+builder.Services.AddAuthentication(x =>
     {
         x.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
         x.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -60,30 +94,32 @@ builder.Services.AddSwaggerGen(options =>
             ValidateAudience = false
         };
     }
-);*/
+);
 
-/*// MinIO client registration
+// MinIO client registration
 var minioEndpoint = builder.Configuration["MINIO_ENDPOINT"] ?? "minio:9000";
 var minioAccessKey = builder.Configuration["MINIO_ACCESS_KEY"] ?? "minioadmin";
 var minioSecretKey = builder.Configuration["MINIO_SECRET_KEY"] ?? "minioadmin";
-var minioClient = new Minio.MinioClient()
+var minioClient = new MinioClient()
     .WithEndpoint(minioEndpoint)
     .WithCredentials(minioAccessKey, minioSecretKey)
     .Build();
 builder.Services.AddSingleton(minioClient);
+builder.Services.AddScoped<MinioService>();
+
 // bucket name config
 builder.Services.Configure<MinioOptions>(options =>
 {
-    options.Bucket = builder.Configuration["MINIO_BUCKET"] ?? "product-images";
-});*/
+    options.Bucket = builder.Configuration["MINIO_BUCKET"] ?? "images";
+});
 
 var app = builder.Build();
 
 app.UseRouting();
 app.UseSwagger();
 app.UseSwaggerUI();
-//app.UseAuthentication();
-//app.UseAuthorization();
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseEndpoints(endpoints => 
 {
     _ = endpoints.MapControllers();
@@ -91,7 +127,8 @@ app.UseEndpoints(endpoints =>
 
 app.Run();
 
-/*public class MinioOptions
+public class MinioOptions
 {
-    public string Bucket { get; set; } = "product-images";
-}*/
+    public string Bucket { get; set; } = "images";
+}
+
