@@ -1,0 +1,65 @@
+services:
+  application-test:
+    container_name: application-test
+    build:
+      context: .
+      dockerfile: Application/Dockerfile
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Testing
+    ports:
+      - "8080:80"
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      minio-test:
+        condition: service_healthy
+    networks:
+      - test-network
+
+  postgres-test:
+    image: postgres
+    container_name: postgres-test
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "postgres"
+      POSTGRES_DB: electronix_test
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio-test:
+    image: minio/minio:latest
+    container_name: minio-test
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9010:9000"
+      - "9011:9001"
+    volumes:
+      - minio_test_data:/data
+    networks:
+      - test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_test_data:
+  minio_test_data:
+
+networks:
+  test-network:
+    driver: bridge

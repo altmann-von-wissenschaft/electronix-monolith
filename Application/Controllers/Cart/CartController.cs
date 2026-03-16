@@ -200,7 +200,7 @@ namespace Application.Controllers.Cart
 
             await _context.SaveChangesAsync();
 
-            return Ok(new { message = "Cart cleared" });
+            return NoContent();
         }
 
         private async Task<CartDto> MapToDtoAsync(Domain.Cart.Cart cart)

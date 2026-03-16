@@ -13,7 +13,22 @@ builder.WebHost.UseUrls("http://*:80");
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddControllers();
 
+// Use postgres-test:5432 if running in docker (Testing environment), otherwise use localhost:5433
 var connectionString = builder.Configuration.GetConnectionString("Default");
+var isDemoEnv = builder.Environment.IsEnvironment("Testing");
+if (isDemoEnv && builder.Configuration.GetConnectionString("DefaultDocker") != null)
+{
+    // Try to detect if we're inside docker by attempting to resolve postgres-test
+    try
+    {
+        var addresses = System.Net.Dns.GetHostAddresses("postgres-test");
+        if (addresses.Length > 0)
+        {
+            connectionString = builder.Configuration.GetConnectionString("DefaultDocker");
+        }
+    }
+    catch { }  // If postgres-test can't be resolved, use the default localhost connection
+}
 
 builder.Services.AddDbContext<UsersDbContext>(options =>
     options.UseNpgsql(connectionString, x => x.MigrationsHistoryTable("__EFMigrationsHistory", "users")));
