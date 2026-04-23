@@ -22,6 +22,14 @@ public class SupportDbContext : DbContext
             e.HasIndex(x => x.UserId);
             e.Property(x => x.Subject).IsRequired();
             e.Property(x => x.Content).IsRequired();
+            // Performance indexes for support query filtering and sorting
+            e.HasIndex(x => x.IsAnswered)
+                .HasDatabaseName("IX_Questions_IsAnswered");
+            e.HasIndex(x => x.CreatedAt)
+                .HasDatabaseName("IX_Questions_CreatedAt")
+                .IsDescending(true);
+            e.HasIndex(x => new { x.UserId, x.IsAnswered })
+                .HasDatabaseName("IX_Questions_UserId_IsAnswered");
             e.HasMany(x => x.Answers)
                 .WithOne(x => x.Question)
                 .OnDelete(DeleteBehavior.Cascade);

@@ -28,6 +28,10 @@ public class CartDbContext : DbContext
         modelBuilder.Entity<CartItem>(e =>
         {
             e.HasKey(x => x.Id);
+            // Performance index for cross-context product lookups and cart operations
+            e.HasIndex(x => x.ProductId);
+            e.HasIndex(x => new { x.CartId, x.ProductId })
+                .HasDatabaseName("IX_CartItems_CartId_ProductId");
             e.HasOne(x => x.Cart)
                 .WithMany(x => x.Items)
                 .HasForeignKey(x => x.CartId)

@@ -23,6 +23,9 @@ public class ProductsDbContext : DbContext
             e.HasKey(x => x.Id);
             e.Property(x => x.Name).IsRequired();
             e.HasIndex(x => x.Name);
+            // Performance index for hierarchical category queries
+            e.HasIndex(x => new { x.ParentId, x.DisplayOrder, x.Name })
+                .HasDatabaseName("IX_Categories_ParentId_DisplayOrder_Name");
             e.HasOne(x => x.Parent)
                 .WithMany(x => x.Children)
                 .HasForeignKey(x => x.ParentId)
@@ -36,6 +39,14 @@ public class ProductsDbContext : DbContext
             e.Property(x => x.Name).IsRequired();
             e.Property(x => x.Price).HasPrecision(12, 2);
             e.HasIndex(x => x.CategoryId);
+            // Performance indexes for high-traffic queries
+            e.HasIndex(x => x.IsHidden)
+                .HasDatabaseName("IX_Products_IsHidden");
+            e.HasIndex(x => new { x.CategoryId, x.IsHidden })
+                .HasDatabaseName("IX_Products_CategoryId_IsHidden");
+            e.HasIndex(x => x.CreatedAt)
+                .HasDatabaseName("IX_Products_CreatedAt")
+                .IsDescending(true);
             e.HasOne(x => x.Category)
                 .WithMany(x => x.Products)
                 .HasForeignKey(x => x.CategoryId)
