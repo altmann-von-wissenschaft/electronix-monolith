@@ -8,7 +8,7 @@ public class QuestionDto
     public string Content { get; set; } = null!;
     public bool IsAnswered { get; set; }
     public DateTime CreatedAt { get; set; }
-    public List<AnswerDto> Answers { get; set; } = new();
+    public AnswerDto? Answer { get; set; }
 }
 
 public class AnswerDto

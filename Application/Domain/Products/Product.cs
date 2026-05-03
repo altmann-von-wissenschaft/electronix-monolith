@@ -15,7 +15,8 @@ public class Product
     public Guid CategoryId { get; set; }
     public Category Category { get; set; } = null!;
 
-    public ICollection<ProductAttribute> Attributes { get; set; } = new List<ProductAttribute>();
+    // Replaced ProductAttributes with unified ProductCharacteristicValues
+    public ICollection<ProductCharacteristicValue> CharacteristicValues { get; set; } = new List<ProductCharacteristicValue>();
     public ICollection<ProductImage> Images { get; set; } = new List<ProductImage>();
     // CartItems, OrderItems, Reviews removed - fetched via API calls
 }

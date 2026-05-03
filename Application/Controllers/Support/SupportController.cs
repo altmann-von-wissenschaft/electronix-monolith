@@ -31,12 +31,12 @@ namespace Application.Controllers.Support
 
             var questions = await _context.Questions
                 .Where(q => q.UserId == userId.Value)
-                .Include(q => q.Answers)
                 .OrderByDescending(q => q.CreatedAt)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .ToListAsync();
-
+            
+            questions.ForEach(async q => await FillAnswerAsync(q));
             var dtos = questions.Select(MapToDto).ToList();
             return Ok(new { data = dtos, page, pageSize });
         }
@@ -50,12 +50,12 @@ namespace Application.Controllers.Support
         {
             var questions = await _context.Questions
                 .Where(q => !q.IsAnswered)
-                .Include(q => q.Answers)
                 .OrderBy(q => q.CreatedAt)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .ToListAsync();
 
+            questions.ForEach(q => q.Answer = null);
             var dtos = questions.Select(MapToDto).ToList();
             return Ok(new { data = dtos, page, pageSize });
         }
@@ -71,11 +71,12 @@ namespace Application.Controllers.Support
                 return Unauthorized();
 
             var question = await _context.Questions
-                .Include(q => q.Answers)
                 .FirstOrDefaultAsync(q => q.Id == id);
 
             if (question == null)
                 return NotFound();
+
+            await FillAnswerAsync(question);
 
             // Users can only see their own questions, managers can see all
             var userRoles = AuthToken.GetRoles(User).ToList();
@@ -115,7 +116,7 @@ namespace Application.Controllers.Support
         /// Answer a question (manager only)
         /// </summary>
         [Authorize(Roles = "MANAGER,ADMINISTRATOR")]
-        [HttpPost("questions/{questionId}/answers")]
+        [HttpPost("questions/{questionId}/answer")]
         public async Task<IActionResult> AnswerQuestion(Guid questionId, [FromBody] CreateAnswerRequest request)
         {
             var managerId = AuthToken.GetID(User);
@@ -123,11 +124,14 @@ namespace Application.Controllers.Support
                 return Unauthorized();
 
             var question = await _context.Questions
-                .Include(q => q.Answers)
                 .FirstOrDefaultAsync(q => q.Id == questionId);
 
             if (question == null)
                 return NotFound();
+
+            await FillAnswerAsync(question);
+            if (question.Answer != null)
+                return BadRequest(new { message = "Question already answered" });
 
             var answer = new Answer
             {
@@ -169,15 +173,23 @@ namespace Application.Controllers.Support
 
             // Check if question still has answers
             var question = await _context.Questions
-                .Include(q => q.Answers)
                 .FirstAsync(q => q.Id == questionId);
 
-            if (!question.Answers.Any())
+            await FillAnswerAsync(question);
+
+            if (question.Answer == null)
                 question.IsAnswered = false;
 
             await _context.SaveChangesAsync();
 
             return Ok(new { message = "Answer deleted" });
+        }
+
+        private async Task FillAnswerAsync(Question question)
+        {
+            question.Answer = await _context.Answers
+                .Where(a => a.QuestionId == question.Id)
+                .FirstOrDefaultAsync();
         }
 
         private QuestionDto MapToDto(Question question)
@@ -190,13 +202,13 @@ namespace Application.Controllers.Support
                 Content = question.Content,
                 IsAnswered = question.IsAnswered,
                 CreatedAt = question.CreatedAt,
-                Answers = question.Answers?.Select(a => new AnswerDto
+                Answer = question.Answer != null ? new AnswerDto
                 {
-                    Id = a.Id,
-                    ManagerUserId = a.ManagerUserId,
-                    Content = a.Content,
-                    CreatedAt = a.CreatedAt
-                }).ToList() ?? new()
+                    Id = question.Answer.Id,
+                    ManagerUserId = question.Answer.ManagerUserId,
+                    Content = question.Answer.Content,
+                    CreatedAt = question.Answer.CreatedAt
+                } : null
             };
         }
     }

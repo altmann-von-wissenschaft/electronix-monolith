@@ -9,7 +9,9 @@ public class ProductsDbContext : DbContext
 
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Product> Products => Set<Product>();
-    public DbSet<ProductAttribute> ProductAttributes => Set<ProductAttribute>();
+    public DbSet<Characteristic> Characteristics => Set<Characteristic>();
+    public DbSet<CategoryCharacteristic> CategoryCharacteristics => Set<CategoryCharacteristic>();
+    public DbSet<ProductCharacteristicValue> ProductCharacteristicValues => Set<ProductCharacteristicValue>();
     public DbSet<ProductImage> ProductImages => Set<ProductImage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -53,14 +55,62 @@ public class ProductsDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // ProductAttributes
-        modelBuilder.Entity<ProductAttribute>(e =>
+        // Characteristic - Reusable product characteristics/attributes
+        modelBuilder.Entity<Characteristic>(e =>
         {
             e.HasKey(x => x.Id);
+            e.Property(x => x.Name).IsRequired();
+            e.Property(x => x.Unit).IsRequired();
+            e.HasIndex(x => x.Name)
+                .HasDatabaseName("IX_Characteristics_Name");
+            e.HasMany(x => x.CategoryCharacteristics)
+                .WithOne(x => x.Characteristic)
+                .HasForeignKey(x => x.CharacteristicId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(x => x.ProductValues)
+                .WithOne(x => x.Characteristic)
+                .HasForeignKey(x => x.CharacteristicId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // CategoryCharacteristic - Join table for Category-Characteristic relationship
+        modelBuilder.Entity<CategoryCharacteristic>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasOne(x => x.Category)
+                .WithMany(x => x.Characteristics)
+                .HasForeignKey(x => x.CategoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Characteristic)
+                .WithMany(x => x.CategoryCharacteristics)
+                .HasForeignKey(x => x.CharacteristicId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // Composite unique index: Each category can have each characteristic once
+            e.HasIndex(x => new { x.CategoryId, x.CharacteristicId })
+                .IsUnique()
+                .HasDatabaseName("IX_CategoryCharacteristic_Unique");
+        });
+
+        // ProductCharacteristicValue - Product-specific values for characteristics
+        modelBuilder.Entity<ProductCharacteristicValue>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Value).IsRequired();
             e.HasOne(x => x.Product)
-                .WithMany(x => x.Attributes)
+                .WithMany(x => x.CharacteristicValues)
                 .HasForeignKey(x => x.ProductId)
                 .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.Characteristic)
+                .WithMany(x => x.ProductValues)
+                .HasForeignKey(x => x.CharacteristicId)
+                .OnDelete(DeleteBehavior.Restrict);
+            // Composite unique index: Each product has each characteristic value once
+            e.HasIndex(x => new { x.ProductId, x.CharacteristicId })
+                .IsUnique()
+                .HasDatabaseName("IX_ProductCharacteristicValue_Unique");
+            // Index for product characteristics lookup
+            e.HasIndex(x => x.ProductId)
+                .HasDatabaseName("IX_ProductCharacteristicValue_ProductId");
         });
 
         // ProductImages

@@ -30,18 +30,17 @@ public class SupportDbContext : DbContext
                 .IsDescending(true);
             e.HasIndex(x => new { x.UserId, x.IsAnswered })
                 .HasDatabaseName("IX_Questions_UserId_IsAnswered");
-            e.HasMany(x => x.Answers)
-                .WithOne(x => x.Question)
-                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Answers
         modelBuilder.Entity<Answer>(e =>
         {
             e.HasKey(x => x.Id);
+            e.HasIndex(x => x.QuestionId)
+                .HasDatabaseName("IX_Answer_QuestionId");
             e.HasOne(x => x.Question)
-                .WithMany(x => x.Answers)
-                .HasForeignKey(x => x.QuestionId)
+                .WithOne(x => x.Answer)
+                .HasForeignKey<Answer>(x => x.QuestionId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
     }

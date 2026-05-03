@@ -8,6 +8,5 @@ public class Question
     public string Content { get; set; } = null!;
     public DateTime CreatedAt { get; set; }
     public bool IsAnswered { get; set; } = false;
-
-    public ICollection<Answer> Answers { get; set; } = new List<Answer>();
+    public Answer? Answer { get; set; }
 }

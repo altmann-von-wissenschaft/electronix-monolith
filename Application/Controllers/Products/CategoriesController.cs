@@ -49,6 +49,8 @@ namespace Application.Controllers.Products
             var category = await _context.Categories
                 .Include(c => c.Parent)
                 .Include(c => c.Children)
+                .Include(c => c.Characteristics)
+                .ThenInclude(cc => cc.Characteristic)
                 .FirstOrDefaultAsync(c => c.Id == id);
 
             if (category == null)
@@ -75,7 +77,6 @@ namespace Application.Controllers.Products
             {
                 Id = Guid.NewGuid(),
                 Name = request.Name,
-                Description = request.Description,
                 ParentId = request.ParentId,
                 DisplayOrder = request.DisplayOrder
             };
@@ -91,31 +92,124 @@ namespace Application.Controllers.Products
         /// </summary>
         [Authorize(Roles = "ADMINISTRATOR")]
         [HttpPut("{id}")]
-        public async Task<IActionResult> UpdateCategory(Guid id, [FromBody] CategoryDto request)
+        public async Task<IActionResult> UpdateCategory(Guid id, [FromBody] UpdateCategoryRequest request)
         {
-            var category = await _context.Categories.FindAsync(id);
-            if (category == null)
-                return NotFound();
-
-            if (!string.IsNullOrEmpty(request.Name))
-                category.Name = request.Name;
-
-            if (request.Description != null)
-                category.Description = request.Description;
-
-            if (request.ParentId.HasValue && request.ParentId.Value != id)
+            try
             {
-                var parent = await _context.Categories.FindAsync(request.ParentId.Value);
-                if (parent == null)
-                    return BadRequest(new { message = "Parent category not found" });
-                category.ParentId = request.ParentId.Value;
+                var category = await _context.Categories
+                    .FirstOrDefaultAsync(c => c.Id == id);
+                if (category == null)
+                    return NotFound();
+
+                if (!string.IsNullOrEmpty(request.Name))
+                    category.Name = request.Name;
+
+                if (request.ParentId.HasValue && request.ParentId.Value != id)
+                {
+                    var parent = await _context.Categories.FindAsync(request.ParentId.Value);
+                    if (parent == null)
+                        return BadRequest(new { message = "Parent category not found" });
+                    category.ParentId = request.ParentId.Value;
+                }
+
+                if (request.DisplayOrder.HasValue)
+                    category.DisplayOrder = request.DisplayOrder.Value;
+
+                if (request.Characteristics != null)
+                {
+                    var duplicateCharacteristicId = request.Characteristics
+                        .GroupBy(c => c.CharacteristicId)
+                        .FirstOrDefault(g => g.Count() > 1)?.Key;
+
+                    if (duplicateCharacteristicId.HasValue)
+                    {
+                        return BadRequest(new
+                        {
+                            message = $"Duplicate characteristicId '{duplicateCharacteristicId.Value}' in request body."
+                        });
+                    }
+
+                    var requestedCharacteristicIds = request.Characteristics
+                        .Select(c => c.CharacteristicId)
+                        .ToHashSet();
+
+                    var categoryCharacteristics = await _context.CategoryCharacteristics
+                        .Where(cc => cc.CategoryId == category.Id)
+                        .ToListAsync();
+
+                    var knownCharacteristicIds = await _context.Characteristics
+                        .Where(c => requestedCharacteristicIds.Contains(c.Id))
+                        .Select(c => c.Id)
+                        .ToListAsync();
+
+                    var missingCharacteristicIds = requestedCharacteristicIds
+                        .Except(knownCharacteristicIds)
+                        .ToList();
+
+                    if (missingCharacteristicIds.Count > 0)
+                    {
+                        return BadRequest(new
+                        {
+                            message = "Some characteristicIds were not found",
+                            characteristicIds = missingCharacteristicIds
+                        });
+                    }
+
+                    var toRemove = categoryCharacteristics
+                        .Where(cc => !requestedCharacteristicIds.Contains(cc.CharacteristicId))
+                        .ToList();
+
+                    if (toRemove.Count > 0)
+                        _context.CategoryCharacteristics.RemoveRange(toRemove);
+
+                    foreach (var requestCharacteristic in request.Characteristics)
+                    {
+                        var existing = categoryCharacteristics
+                            .FirstOrDefault(cc => cc.CharacteristicId == requestCharacteristic.CharacteristicId);
+
+                        if (existing == null)
+                        {
+                            _context.CategoryCharacteristics.Add(new CategoryCharacteristic
+                            {
+                                Id = Guid.NewGuid(),
+                                CategoryId = category.Id,
+                                CharacteristicId = requestCharacteristic.CharacteristicId,
+                                IsRequired = requestCharacteristic.IsRequired
+                            });
+                        }
+                        else
+                        {
+                            existing.IsRequired = requestCharacteristic.IsRequired;
+                        }
+                    }
+                }
+
+                await _context.SaveChangesAsync();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                var stillExists = await _context.Categories.AnyAsync(c => c.Id == id);
+                if (!stillExists)
+                    return NotFound(new { message = "Category not found" });
+
+                return Conflict(new
+                {
+                    message = "Category was modified by another request. Please refresh and retry."
+                });
             }
 
-            category.DisplayOrder = request.DisplayOrder;
+            var updatedCategory = await _context.Categories
+                .AsNoTracking()
+                .Include(c => c.Parent)
+                .Include(c => c.Children)
+                .Include(c => c.Characteristics)
+                .ThenInclude(cc => cc.Characteristic)
+                .FirstOrDefaultAsync(c => c.Id == id);
 
-            await _context.SaveChangesAsync();
+            if (updatedCategory == null)
+                return NotFound(new { message = "Category not found" });
 
-            return Ok(MapToDto(category));
+            return Ok(MapToDto(updatedCategory));
         }
 
         /// <summary>
@@ -148,9 +242,17 @@ namespace Application.Controllers.Products
             {
                 Id = category.Id,
                 Name = category.Name,
-                Description = category.Description,
                 ParentId = category.ParentId,
-                DisplayOrder = category.DisplayOrder
+                DisplayOrder = category.DisplayOrder,
+                Characteristics = category.Characteristics.OrderBy(c => c.Characteristic.Name)
+                    .Select(cc => new CategoryCharacteristicDto
+                    {
+                        Id = cc.Id,
+                        CharacteristicId = cc.CharacteristicId,
+                        CharacteristicName = cc.Characteristic.Name,
+                        Unit = cc.Characteristic.Unit,
+                        IsRequired = cc.IsRequired
+                    }).ToList()
             };
         }
     }

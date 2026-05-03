@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Application.Infrastructure.Contexts.Migrations.Products
 {
     [DbContext(typeof(ProductsDbContext))]
-    [Migration("20260421151452_AddProductsPerformanceIndexes")]
-    partial class AddProductsPerformanceIndexes
+    [Migration("20260502123633_ChangeCharacteristicValueToDouble")]
+    partial class ChangeCharacteristicValueToDouble
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -31,9 +31,6 @@ namespace Application.Infrastructure.Contexts.Migrations.Products
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
-
-                    b.Property<string>("Description")
-                        .HasColumnType("text");
 
                     b.Property<int>("DisplayOrder")
                         .HasColumnType("integer");
@@ -53,6 +50,54 @@ namespace Application.Infrastructure.Contexts.Migrations.Products
                         .HasDatabaseName("IX_Categories_ParentId_DisplayOrder_Name");
 
                     b.ToTable("Categories", "products");
+                });
+
+            modelBuilder.Entity("Domain.Products.CategoryCharacteristic", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CategoryId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CharacteristicId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("IsRequired")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CharacteristicId");
+
+                    b.HasIndex("CategoryId", "CharacteristicId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_CategoryCharacteristic_Unique");
+
+                    b.ToTable("CategoryCharacteristics", "products");
+                });
+
+            modelBuilder.Entity("Domain.Products.Characteristic", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Unit")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Name")
+                        .HasDatabaseName("IX_Characteristics_Name");
+
+                    b.ToTable("Characteristics", "products");
                 });
 
             modelBuilder.Entity("Domain.Products.Product", b =>
@@ -107,31 +152,33 @@ namespace Application.Infrastructure.Contexts.Migrations.Products
                     b.ToTable("Products", "products");
                 });
 
-            modelBuilder.Entity("Domain.Products.ProductAttribute", b =>
+            modelBuilder.Entity("Domain.Products.ProductCharacteristicValue", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<Guid>("CharacteristicId")
+                        .HasColumnType("uuid");
 
                     b.Property<Guid>("ProductId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("Unit")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Value")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<double>("Value")
+                        .HasColumnType("double precision");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProductId");
+                    b.HasIndex("CharacteristicId");
 
-                    b.ToTable("ProductAttributes", "products");
+                    b.HasIndex("ProductId")
+                        .HasDatabaseName("IX_ProductCharacteristicValue_ProductId");
+
+                    b.HasIndex("ProductId", "CharacteristicId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ProductCharacteristicValue_Unique");
+
+                    b.ToTable("ProductCharacteristicValues", "products");
                 });
 
             modelBuilder.Entity("Domain.Products.ProductImage", b =>
@@ -170,6 +217,25 @@ namespace Application.Infrastructure.Contexts.Migrations.Products
                     b.Navigation("Parent");
                 });
 
+            modelBuilder.Entity("Domain.Products.CategoryCharacteristic", b =>
+                {
+                    b.HasOne("Domain.Products.Category", "Category")
+                        .WithMany("Characteristics")
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Domain.Products.Characteristic", "Characteristic")
+                        .WithMany("CategoryCharacteristics")
+                        .HasForeignKey("CharacteristicId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Category");
+
+                    b.Navigation("Characteristic");
+                });
+
             modelBuilder.Entity("Domain.Products.Product", b =>
                 {
                     b.HasOne("Domain.Products.Category", "Category")
@@ -181,13 +247,21 @@ namespace Application.Infrastructure.Contexts.Migrations.Products
                     b.Navigation("Category");
                 });
 
-            modelBuilder.Entity("Domain.Products.ProductAttribute", b =>
+            modelBuilder.Entity("Domain.Products.ProductCharacteristicValue", b =>
                 {
+                    b.HasOne("Domain.Products.Characteristic", "Characteristic")
+                        .WithMany("ProductValues")
+                        .HasForeignKey("CharacteristicId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("Domain.Products.Product", "Product")
-                        .WithMany("Attributes")
+                        .WithMany("CharacteristicValues")
                         .HasForeignKey("ProductId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Characteristic");
 
                     b.Navigation("Product");
                 });
@@ -205,14 +279,23 @@ namespace Application.Infrastructure.Contexts.Migrations.Products
 
             modelBuilder.Entity("Domain.Products.Category", b =>
                 {
+                    b.Navigation("Characteristics");
+
                     b.Navigation("Children");
 
                     b.Navigation("Products");
                 });
 
+            modelBuilder.Entity("Domain.Products.Characteristic", b =>
+                {
+                    b.Navigation("CategoryCharacteristics");
+
+                    b.Navigation("ProductValues");
+                });
+
             modelBuilder.Entity("Domain.Products.Product", b =>
                 {
-                    b.Navigation("Attributes");
+                    b.Navigation("CharacteristicValues");
 
                     b.Navigation("Images");
                 });

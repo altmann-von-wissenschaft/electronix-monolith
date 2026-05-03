@@ -1,5 +1,6 @@
 using Application;
 using Application.Services;
+using Application.Swagger;
 using Infrastructure.Contexts;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -90,6 +91,8 @@ builder.Services.AddSwaggerGen(options =>
             new List<string>()
         }
     });
+
+    options.OperationFilter<ProductsFilterQueryOperationFilter>();
 });
 
 builder.Services.AddAuthentication(x =>

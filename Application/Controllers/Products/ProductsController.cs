@@ -12,6 +12,7 @@ namespace Application.Controllers.Products
     [Route("api/products")]
     public class ProductsController : ControllerBase
     {
+        private const string CharacteristicFilterPrefix = "filter.";
         private readonly ProductsDbContext _context;
         private readonly MinioService _minioService;
 
@@ -27,21 +28,126 @@ namespace Application.Controllers.Products
         [HttpGet]
         public async Task<IActionResult> GetProducts([FromQuery] Guid? categoryId = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
         {
+            if (page < 1 || pageSize < 1)
+                return BadRequest(new { message = "page and pageSize must be greater than 0" });
+
+            var filterParseResult = ParseCharacteristicFilters();
+            if (!filterParseResult.IsValid)
+                return BadRequest(new { message = filterParseResult.ErrorMessage });
+
             var query = _context.Products.Where(p => !p.IsHidden);
 
             if (categoryId.HasValue)
                 query = query.Where(p => p.CategoryId == categoryId.Value);
 
+            foreach (var filter in filterParseResult.Filters)
+            {
+                var characteristicId = filter.Key;
+                var min = filter.Min;
+                var max = filter.Max;
+
+                query = query.Where(p => p.CharacteristicValues.Any(cv =>
+                    cv.CharacteristicId == characteristicId &&
+                    (!min.HasValue || cv.Value >= min.Value) &&
+                    (!max.HasValue || cv.Value <= max.Value)));
+            }
+
             var products = await query
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .Include(p => p.Category)
-                .Include(p => p.Attributes)
+                .Include(p => p.CharacteristicValues)
+                .ThenInclude(cv => cv.Characteristic)
                 .Include(p => p.Images)
                 .ToListAsync();
 
             var dtos = products.Select(p => MapToDto(p)).ToList();
             return Ok(new { data = dtos, page, pageSize });
+        }
+
+        private CharacteristicFilterParseResult ParseCharacteristicFilters()
+        {
+            var filters = new Dictionary<Guid, CharacteristicFilter>();
+
+            foreach (var queryPair in Request.Query)
+            {
+                var queryKey = queryPair.Key;
+                if (!queryKey.StartsWith(CharacteristicFilterPrefix, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var suffix = queryKey[CharacteristicFilterPrefix.Length..];
+                var parts = suffix.Split('.', StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length != 2)
+                    return CharacteristicFilterParseResult.Invalid(
+                        $"Invalid filter parameter '{queryKey}'. Use format filter.<characteristicGuid>.min|max.");
+
+                if (!Guid.TryParse(parts[0], out var characteristicId))
+                    return CharacteristicFilterParseResult.Invalid(
+                        $"Invalid characteristic GUID in filter parameter '{queryKey}'.");
+
+                var bound = parts[1].ToLowerInvariant();
+                if (bound is not ("min" or "max"))
+                    return CharacteristicFilterParseResult.Invalid(
+                        $"Invalid filter bound '{parts[1]}' in parameter '{queryKey}'. Use min or max.");
+
+                if (!double.TryParse(queryPair.Value, out var boundValue))
+                    return CharacteristicFilterParseResult.Invalid(
+                        $"Invalid numeric value '{queryPair.Value}' in parameter '{queryKey}'.");
+
+                if (!filters.TryGetValue(characteristicId, out var filter))
+                {
+                    filter = new CharacteristicFilter(characteristicId);
+                    filters[characteristicId] = filter;
+                }
+
+                if (bound == "min")
+                    filter.Min = boundValue;
+                else
+                    filter.Max = boundValue;
+            }
+
+            foreach (var filter in filters.Values)
+            {
+                if (filter.Min.HasValue && filter.Max.HasValue && filter.Min > filter.Max)
+                {
+                    return CharacteristicFilterParseResult.Invalid(
+                        $"Invalid range for characteristic '{filter.Key}': min cannot be greater than max.");
+                }
+            }
+
+            return CharacteristicFilterParseResult.Valid(filters.Values.ToList());
+        }
+
+        private sealed class CharacteristicFilter
+        {
+            public CharacteristicFilter(Guid key)
+            {
+                Key = key;
+            }
+
+            public Guid Key { get; }
+            public double? Min { get; set; }
+            public double? Max { get; set; }
+        }
+
+        private sealed class CharacteristicFilterParseResult
+        {
+            private CharacteristicFilterParseResult(List<CharacteristicFilter> filters, bool isValid, string? errorMessage)
+            {
+                Filters = filters;
+                IsValid = isValid;
+                ErrorMessage = errorMessage;
+            }
+
+            public List<CharacteristicFilter> Filters { get; }
+            public bool IsValid { get; }
+            public string? ErrorMessage { get; }
+
+            public static CharacteristicFilterParseResult Valid(List<CharacteristicFilter> filters) =>
+                new(filters, true, null);
+
+            public static CharacteristicFilterParseResult Invalid(string errorMessage) =>
+                new(new List<CharacteristicFilter>(), false, errorMessage);
         }
 
         /// <summary>
@@ -52,7 +158,8 @@ namespace Application.Controllers.Products
         {
             var product = await _context.Products
                 .Include(p => p.Category)
-                .Include(p => p.Attributes)
+                .Include(p => p.CharacteristicValues)
+                .ThenInclude(cv => cv.Characteristic)
                 .Include(p => p.Images)
                 .FirstOrDefaultAsync(p => p.Id == id);
 
@@ -87,23 +194,30 @@ namespace Application.Controllers.Products
 
             _context.Products.Add(product);
 
-            if (request.Attributes.Any())
+            if (request.CharacteristicValues.Any())
             {
-                foreach (var attr in request.Attributes)
+                var requiredCharacteristics = await _context.CategoryCharacteristics
+                    .Where(cc => cc.CategoryId == request.CategoryId)
+                    .ToListAsync();
+
+                foreach (var charValue in request.CharacteristicValues)
                 {
-                    _context.ProductAttributes.Add(new ProductAttribute
+                    if (requiredCharacteristics.Any(rc => rc.CharacteristicId == charValue.Key))
                     {
-                        Id = Guid.NewGuid(),
-                        ProductId = product.Id,
-                        Name = attr.Name,
-                        Value = attr.Value,
-                        Unit = attr.Unit
-                    });
+                        _context.ProductCharacteristicValues.Add(new ProductCharacteristicValue
+                        {
+                            Id = Guid.NewGuid(),
+                            ProductId = product.Id,
+                            CharacteristicId = charValue.Key,
+                            Value = double.Parse(charValue.Value)
+                        });
+                    }
                 }
             }
 
             await _context.SaveChangesAsync();
-            return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, MapToDto(product));
+            var createdProduct = await LoadProductForDto(product.Id);
+            return CreatedAtAction(nameof(GetProduct), new { id = product.Id }, MapToDto(createdProduct ?? product));
         }
 
         /// <summary>
@@ -113,7 +227,9 @@ namespace Application.Controllers.Products
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateProduct(Guid id, [FromBody] UpdateProductRequest request)
         {
-            var product = await _context.Products.FindAsync(id);
+            var product = await _context.Products
+                .Include(p => p.CharacteristicValues)
+                .FirstOrDefaultAsync(p => p.Id == id);
             if (product == null)
                 return NotFound();
 
@@ -137,10 +253,34 @@ namespace Application.Controllers.Products
                 product.CategoryId = request.CategoryId.Value;
             }
 
+            if (request.CharacteristicValues != null && request.CharacteristicValues.Any())
+            {
+                var existingCharValues = product.CharacteristicValues.ToDictionary(cv => cv.CharacteristicId);
+
+                foreach (var charValue in request.CharacteristicValues)
+                {
+                    if (existingCharValues.TryGetValue(charValue.Key, out var existing))
+                    {
+                        existing.Value = double.Parse(charValue.Value);
+                    }
+                    else
+                    {
+                        _context.ProductCharacteristicValues.Add(new ProductCharacteristicValue
+                        {
+                            Id = Guid.NewGuid(),
+                            ProductId = id,
+                            CharacteristicId = charValue.Key,
+                            Value = double.Parse(charValue.Value)
+                        });
+                    }
+                }
+            }
+
             product.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
 
-            return Ok(MapToDto(product));
+            var updatedProduct = await LoadProductForDto(id);
+            return Ok(MapToDto(updatedProduct ?? product));
         }
 
         /// <summary>
@@ -234,14 +374,29 @@ namespace Application.Controllers.Products
                 IsHidden = product.IsHidden,
                 MainImagePath = product.MainImagePath,
                 CategoryId = product.CategoryId,
-                Attributes = product.Attributes.Select(a => new ProductAttributeDto
-                {
-                    Name = a.Name,
-                    Value = a.Value,
-                    Unit = a.Unit
-                }).ToList(),
-                ImagePaths = product.Images.OrderBy(i => i.DisplayOrder).Select(i => i.ObjectName).ToList()
+                Characteristics = (product.CharacteristicValues ?? Enumerable.Empty<ProductCharacteristicValue>())
+                    .Select(cv => new ProductCharacteristicValueDto
+                    {
+                        CharacteristicId = cv.CharacteristicId,
+                        Name = cv.Characteristic?.Name ?? string.Empty,
+                        Value = cv.Value,
+                        Unit = cv.Characteristic?.Unit ?? string.Empty
+                    }).ToList(),
+                ImagePaths = (product.Images ?? Enumerable.Empty<ProductImage>())
+                    .OrderBy(i => i.DisplayOrder)
+                    .Select(i => i.ObjectName)
+                    .ToList()
             };
+        }
+
+        private Task<Product?> LoadProductForDto(Guid id)
+        {
+            return _context.Products
+                .Include(p => p.Category)
+                .Include(p => p.CharacteristicValues)
+                .ThenInclude(cv => cv.Characteristic)
+                .Include(p => p.Images)
+                .FirstOrDefaultAsync(p => p.Id == id);
         }
     }
 }
