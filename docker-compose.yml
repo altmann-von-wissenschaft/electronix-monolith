@@ -16,8 +16,12 @@ services:
     build:
       context: .
       dockerfile: Application/Dockerfile
+    environment:
+      - Firebase__CredentialsPath=/app/firebase/adminsdk.json
     ports:
       - "80:80"
+    volumes:
+      - ./adminsdk.json:/app/firebase/adminsdk.json:ro
     depends_on:
       minio:
         condition: service_healthy

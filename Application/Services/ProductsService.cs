@@ -7,11 +7,13 @@ public class ProductsService
 {
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<ProductsService> _logger;
 
-    public ProductsService(HttpClient httpClient, IConfiguration configuration)
+    public ProductsService(HttpClient httpClient, IConfiguration configuration, ILogger<ProductsService> logger)
     {
         _httpClient = httpClient;
         _configuration = configuration;
+        _logger = logger;
     }
 
     private string GetProductsUrl() => _configuration["ServiceUrls:Products"] ?? "http://localhost:80";
@@ -23,17 +25,19 @@ public class ProductsService
     {
         try
         {
-            var response = await _httpClient.GetAsync($"{GetProductsUrl()}/api/products/{productId}");
+            var url = InterServiceUrl.Combine(GetProductsUrl(), "api/products", productId.ToString());
+            var response = await _httpClient.GetAsync(url);
             if (response.IsSuccessStatusCode)
             {
                 var json = await response.Content.ReadAsStringAsync();
-                return System.Text.Json.JsonSerializer.Deserialize<ProductResponse>(json, 
+                return System.Text.Json.JsonSerializer.Deserialize<ProductResponse>(json,
                     new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
             }
             return null;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Products HTTP GET failed for product {ProductId}", productId);
             return null;
         }
     }
@@ -49,24 +53,36 @@ public class ProductsService
     }
 
     /// <summary>
-    /// Update product stock
+    /// Update product stock via PUT <c>api/products/{id}</c> (matches monolith API). Intended for split deployments with forwarded authorization.
     /// </summary>
     public async Task<bool> UpdateStockAsync(Guid productId, int quantityChange)
     {
         try
         {
-            var request = new { quantityChange };
-            var content = new StringContent(
-                System.Text.Json.JsonSerializer.Serialize(request),
-                System.Text.Encoding.UTF8,
-                "application/json");
+            var basePrefix = InterServiceUrl.Combine(GetProductsUrl(), "api/products", productId.ToString());
+            var getResp = await _httpClient.GetAsync(basePrefix);
+            if (!getResp.IsSuccessStatusCode)
+                return false;
 
-            var response = await _httpClient.PatchAsync(
-                $"{GetProductsUrl()}/api/products/{productId}/stock", content);
+            var json = await getResp.Content.ReadAsStringAsync();
+            var current = System.Text.Json.JsonSerializer.Deserialize<ProductResponse>(json,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (current == null)
+                return false;
+
+            var newStock = current.Stock + quantityChange;
+            if (newStock < 0)
+                return false;
+
+            var putBody = System.Text.Json.JsonSerializer.Serialize(new { stock = newStock });
+            var content = new StringContent(putBody, System.Text.Encoding.UTF8, "application/json");
+            var putUrl = InterServiceUrl.Combine(GetProductsUrl(), "api/products", productId.ToString());
+            var response = await _httpClient.PutAsync(putUrl, content);
             return response.IsSuccessStatusCode;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Products HTTP stock update failed for product {ProductId}, delta {Delta}", productId, quantityChange);
             return false;
         }
     }

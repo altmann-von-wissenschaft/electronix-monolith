@@ -30,3 +30,23 @@ public class UserDto
     public bool IsBlocked { get; set; }
     public List<string> Roles { get; set; } = new();
 }
+
+public class PutFcmTokenRequest
+{
+    public string Token { get; set; } = null!;
+}
+
+public class PutPushPreferencesRequest
+{
+    public bool NotifyOrderStatus { get; set; }
+    public bool NotifySupportReply { get; set; }
+    public bool NotifyReviewModeration { get; set; }
+    public bool NotifySupportQueue { get; set; }
+}
+
+public class ChangePasswordRequest
+{
+    public string CurrentPassword { get; set; } = null!;
+    public string NewPassword { get; set; } = null!;
+    public string ConfirmNewPassword { get; set; } = null!;
+}

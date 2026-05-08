@@ -26,7 +26,11 @@ namespace Application.Controllers.Products
         /// Get all non-hidden products
         /// </summary>
         [HttpGet]
-        public async Task<IActionResult> GetProducts([FromQuery] Guid? categoryId = null, [FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+        public async Task<IActionResult> GetProducts(
+            [FromQuery] Guid? categoryId = null,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 20,
+            [FromQuery] string? search = null)
         {
             if (page < 1 || pageSize < 1)
                 return BadRequest(new { message = "page and pageSize must be greater than 0" });
@@ -36,6 +40,12 @@ namespace Application.Controllers.Products
                 return BadRequest(new { message = filterParseResult.ErrorMessage });
 
             var query = _context.Products.Where(p => !p.IsHidden);
+
+            if (!string.IsNullOrWhiteSpace(search))
+            {
+                var term = search.Trim();
+                query = query.Where(p => p.Name.ToLower().Contains(term.ToLower()));
+            }
 
             if (categoryId.HasValue)
                 query = query.Where(p => p.CategoryId == categoryId.Value);
@@ -53,12 +63,16 @@ namespace Application.Controllers.Products
             }
 
             var products = await query
+                .AsNoTracking()
+                .OrderByDescending(p => p.UpdatedAt)
+                .ThenBy(p => p.Id)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .Include(p => p.Category)
                 .Include(p => p.CharacteristicValues)
                 .ThenInclude(cv => cv.Characteristic)
                 .Include(p => p.Images)
+                .AsSplitQuery()
                 .ToListAsync();
 
             var dtos = products.Select(p => MapToDto(p)).ToList();
@@ -157,10 +171,12 @@ namespace Application.Controllers.Products
         public async Task<IActionResult> GetProduct(Guid id)
         {
             var product = await _context.Products
+                .AsNoTracking()
                 .Include(p => p.Category)
                 .Include(p => p.CharacteristicValues)
                 .ThenInclude(cv => cv.Characteristic)
                 .Include(p => p.Images)
+                .AsSplitQuery()
                 .FirstOrDefaultAsync(p => p.Id == id);
 
             if (product == null || product.IsHidden)
@@ -392,10 +408,12 @@ namespace Application.Controllers.Products
         private Task<Product?> LoadProductForDto(Guid id)
         {
             return _context.Products
+                .AsNoTracking()
                 .Include(p => p.Category)
                 .Include(p => p.CharacteristicValues)
                 .ThenInclude(cv => cv.Characteristic)
                 .Include(p => p.Images)
+                .AsSplitQuery()
                 .FirstOrDefaultAsync(p => p.Id == id);
         }
     }

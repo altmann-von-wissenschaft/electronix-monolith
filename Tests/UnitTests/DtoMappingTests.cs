@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Application.DTOs.Orders;
 using Domain.Orders;
 
@@ -21,7 +22,9 @@ public class OrderDtoMappingTests
             },
             TotalOrders = 5,
             TotalRevenue = 500.00m,
-            AverageOrderValue = 100.00m
+            AverageOrderValue = 100.00m,
+            Granularity = "day",
+            Series = new List<SalesReportPointDto>(),
         };
 
         // Assert

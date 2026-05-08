@@ -63,6 +63,7 @@ public class CreateCategoryDto
     public string Name { get; set; } = null!;
     public Guid? ParentId { get; set; }
     public int DisplayOrder { get; set; }
+    public List<AssignCharacteristicRequest>? Characteristics { get; set; }
 }
 
 public class UpdateCategoryRequest

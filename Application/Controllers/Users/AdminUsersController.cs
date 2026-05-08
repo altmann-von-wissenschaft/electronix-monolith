@@ -1,5 +1,4 @@
 using Application.DTOs.Users;
-using Application.Services;
 using Domain.Users;
 using Infrastructure.Contexts;
 using Microsoft.AspNetCore.Authorization;
@@ -10,25 +9,25 @@ namespace Application.Controllers.Users
 {
     [ApiController]
     [Route("api/admin/users")]
-    [Authorize(Roles = "ADMINISTRATOR")]
+    [Authorize] // per-action: list/roles = admin only; lookup + block = moderator or admin
     public class AdminUsersController : ControllerBase
     {
         private readonly UsersDbContext _context;
-        private readonly OrdersService _ordersService;
 
-        public AdminUsersController(UsersDbContext context, OrdersService ordersService)
+        public AdminUsersController(UsersDbContext context)
         {
             _context = context;
-            _ordersService = ordersService;
         }
 
         /// <summary>
         /// Get all users (admin only)
         /// </summary>
         [HttpGet]
+        [Authorize(Roles = "ADMINISTRATOR")]
         public async Task<IActionResult> GetAllUsers([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
         {
             var users = await _context.Users
+                .AsNoTracking()
                 .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
                 .OrderBy(u => u.CreatedAt)
@@ -44,9 +43,11 @@ namespace Application.Controllers.Users
         /// Get user by ID (admin only)
         /// </summary>
         [HttpGet("{id}")]
+        [Authorize(Roles = "MODERATOR,ADMINISTRATOR")]
         public async Task<IActionResult> GetUser(Guid id)
         {
             var user = await _context.Users
+                .AsNoTracking()
                 .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
                 .FirstOrDefaultAsync(u => u.Id == id);
@@ -61,11 +62,23 @@ namespace Application.Controllers.Users
         /// Block/Unblock user (admin only)
         /// </summary>
         [HttpPost("{id}/block")]
+        [Authorize(Roles = "MODERATOR,ADMINISTRATOR")]
         public async Task<IActionResult> BlockUser(Guid id, [FromBody] bool block)
         {
-            var user = await _context.Users.FindAsync(id);
+            var user = await _context.Users
+                .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+                .FirstOrDefaultAsync(u => u.Id == id);
             if (user == null)
                 return NotFound();
+
+            // Moderators cannot block administrator accounts
+            if (!User.IsInRole("ADMINISTRATOR") && User.IsInRole("MODERATOR"))
+            {
+                if (user.UserRoles.Any(ur => ur.Role.Code == "ADMINISTRATOR"))
+                    return StatusCode(StatusCodes.Status403Forbidden,
+                        new { message = "Moderators cannot block administrator accounts" });
+            }
 
             user.IsBlocked = block;
             user.UpdatedAt = DateTime.UtcNow;
@@ -79,6 +92,7 @@ namespace Application.Controllers.Users
         /// Assign role to user (admin only)
         /// </summary>
         [HttpPost("{id}/roles")]
+        [Authorize(Roles = "ADMINISTRATOR")]
         public async Task<IActionResult> AssignRole(Guid id, [FromBody] string roleCode)
         {
             var user = await _context.Users
@@ -115,6 +129,7 @@ namespace Application.Controllers.Users
         /// Remove role from user (admin only)
         /// </summary>
         [HttpDelete("{id}/roles/{roleCode}")]
+        [Authorize(Roles = "ADMINISTRATOR")]
         public async Task<IActionResult> RemoveRole(Guid id, string roleCode)
         {
             var user = await _context.Users

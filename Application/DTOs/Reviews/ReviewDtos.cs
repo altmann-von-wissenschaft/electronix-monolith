@@ -5,6 +5,7 @@ public class ReviewDto
     public Guid Id { get; set; }
     public Guid ProductId { get; set; }
     public Guid UserId { get; set; }
+    public string? AuthorNickname { get; set; }
     public int Rating { get; set; }
     public string Title { get; set; } = null!;
     public string Content { get; set; } = null!;

@@ -1,14 +1,23 @@
 using Application;
 using Application.Services;
 using Application.Swagger;
+using FirebaseAdmin;
+using Google.Apis.Auth.OAuth2;
 using Infrastructure.Contexts;
+using Infrastructure.DependencyInjection;
+using System.IdentityModel.Tokens.Jwt;
+using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Minio;
 
 var builder = WebApplication.CreateBuilder(args);
+
+var jwtOptions = JwtOptions.CreateWithLegacyFallbacks(
+    builder.Configuration.GetSection("Jwt").Get<JwtOptions>());
+builder.Services.AddSingleton(jwtOptions);
 
 builder.WebHost.UseUrls("http://*:80");
 builder.Services.AddEndpointsApiExplorer();
@@ -31,26 +40,28 @@ if (isDemoEnv && builder.Configuration.GetConnectionString("DefaultDocker") != n
     catch { }  // If postgres-test can't be resolved, use the default localhost connection
 }
 
-builder.Services.AddDbContext<UsersDbContext>(options =>
-    options.UseNpgsql(connectionString, x => x.MigrationsHistoryTable("__EFMigrationsHistory", "users")));
+builder.Services.AddElectronixNpgsqlDbContext<UsersDbContext>(connectionString, "users");
+builder.Services.AddElectronixNpgsqlDbContext<ProductsDbContext>(connectionString, "products");
+builder.Services.AddElectronixNpgsqlDbContext<OrdersDbContext>(connectionString, "orders");
+builder.Services.AddElectronixNpgsqlDbContext<CartDbContext>(connectionString, "cart");
+builder.Services.AddElectronixNpgsqlDbContext<ReviewsDbContext>(connectionString, "reviews");
+builder.Services.AddElectronixNpgsqlDbContext<SupportDbContext>(connectionString, "support");
 
-builder.Services.AddDbContext<ProductsDbContext>(options =>
-    options.UseNpgsql(connectionString, x => x.MigrationsHistoryTable("__EFMigrationsHistory", "products")));
-
-builder.Services.AddDbContext<OrdersDbContext>(options =>
-    options.UseNpgsql(connectionString, x => x.MigrationsHistoryTable("__EFMigrationsHistory", "orders")));
-
-builder.Services.AddDbContext<CartDbContext>(options =>
-    options.UseNpgsql(connectionString, x => x.MigrationsHistoryTable("__EFMigrationsHistory", "cart")));
-
-builder.Services.AddDbContext<ReviewsDbContext>(options =>
-    options.UseNpgsql(connectionString, x => x.MigrationsHistoryTable("__EFMigrationsHistory", "reviews")));
-
-builder.Services.AddDbContext<SupportDbContext>(options =>
-    options.UseNpgsql(connectionString, x => x.MigrationsHistoryTable("__EFMigrationsHistory", "support")));
+var firebaseCredPath = builder.Configuration["Firebase:CredentialsPath"];
+if (!string.IsNullOrWhiteSpace(firebaseCredPath))
+{
+    var resolved = Path.IsPathRooted(firebaseCredPath)
+        ? firebaseCredPath
+        : Path.Combine(builder.Environment.ContentRootPath, firebaseCredPath);
+    if (File.Exists(resolved))
+    {
+        FirebaseApp.Create(new AppOptions { Credential = GoogleCredential.FromFile(resolved) });
+    }
+}
 
 // Register services
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<IPushNotificationSender, FirebasePushNotificationSender>();
 builder.Services.AddHttpClient<ProductsService>();
 builder.Services.AddHttpClient<OrdersService>();
 
@@ -107,9 +118,27 @@ builder.Services.AddAuthentication(x =>
         x.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(AuthToken.key),
-            ValidateIssuer = false,
-            ValidateAudience = false
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SecretKey)),
+            RequireSignedTokens = true,
+            ValidateIssuer = true,
+            ValidIssuer = jwtOptions.Issuer,
+            ValidateAudience = true,
+            ValidAudience = jwtOptions.Audience,
+            ValidateLifetime = true,
+            RequireExpirationTime = true,
+            ClockSkew = TimeSpan.FromMinutes(2),
+        };
+        x.Events = new JwtBearerEvents
+        {
+            OnTokenValidated = context =>
+            {
+                if (context.SecurityToken is JwtSecurityToken jwt &&
+                    !string.Equals(jwt.Header.Alg, SecurityAlgorithms.HmacSha256, StringComparison.Ordinal))
+                {
+                    context.Fail("Invalid token signing algorithm.");
+                }
+                return Task.CompletedTask;
+            },
         };
     }
 );
@@ -133,6 +162,10 @@ builder.Services.Configure<MinioOptions>(options =>
 
 var app = builder.Build();
 
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+});
 app.UseRouting();
 app.UseSwagger();
 app.UseSwaggerUI();

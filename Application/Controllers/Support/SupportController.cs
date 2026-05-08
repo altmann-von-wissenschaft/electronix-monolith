@@ -1,4 +1,5 @@
 using Application.DTOs.Support;
+using Application.Services;
 using Domain.Support;
 using Infrastructure.Contexts;
 using Microsoft.AspNetCore.Authorization;
@@ -12,11 +13,19 @@ namespace Application.Controllers.Support
     [Authorize]
     public class SupportController : ControllerBase
     {
+        private const int SubjectMin = 4;
+        private const int SubjectMax = 120;
+        private const int ContentMin = 10;
+        private const int ContentMax = 2000;
+        private const int AnswerMin = 8;
+        private const int AnswerMax = 2000;
         private readonly SupportDbContext _context;
+        private readonly IPushNotificationSender _push;
 
-        public SupportController(SupportDbContext context)
+        public SupportController(SupportDbContext context, IPushNotificationSender push)
         {
             _context = context;
+            _push = push;
         }
 
         /// <summary>
@@ -30,13 +39,15 @@ namespace Application.Controllers.Support
                 return Unauthorized();
 
             var questions = await _context.Questions
+                .AsNoTracking()
                 .Where(q => q.UserId == userId.Value)
                 .OrderByDescending(q => q.CreatedAt)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .ToListAsync();
-            
-            questions.ForEach(async q => await FillAnswerAsync(q));
+
+            await FillAnswersAsync(questions);
+
             var dtos = questions.Select(MapToDto).ToList();
             return Ok(new { data = dtos, page, pageSize });
         }
@@ -49,12 +60,14 @@ namespace Application.Controllers.Support
         public async Task<IActionResult> GetUnansweredQuestions([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
         {
             var questions = await _context.Questions
+                .AsNoTracking()
                 .Where(q => !q.IsAnswered)
                 .OrderBy(q => q.CreatedAt)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
                 .ToListAsync();
 
+            await FillAnswersAsync(questions);
             questions.ForEach(q => q.Answer = null);
             var dtos = questions.Select(MapToDto).ToList();
             return Ok(new { data = dtos, page, pageSize });
@@ -96,18 +109,27 @@ namespace Application.Controllers.Support
             if (!userId.HasValue)
                 return Unauthorized();
 
+            var subject = request.Subject?.Trim() ?? "";
+            var content = request.Content?.Trim() ?? "";
+            if (subject.Length < SubjectMin || subject.Length > SubjectMax)
+                return BadRequest(new { message = $"Тема: от {SubjectMin} до {SubjectMax} символов." });
+            if (content.Length < ContentMin || content.Length > ContentMax)
+                return BadRequest(new { message = $"Текст обращения: от {ContentMin} до {ContentMax} символов." });
+
             var question = new Question
             {
                 Id = Guid.NewGuid(),
                 UserId = userId.Value,
-                Subject = request.Subject,
-                Content = request.Content,
+                Subject = subject,
+                Content = content,
                 CreatedAt = DateTime.UtcNow,
                 IsAnswered = false
             };
 
             _context.Questions.Add(question);
             await _context.SaveChangesAsync();
+
+            await _push.NotifyNewSupportQuestionForStaffAsync(question.Id, question.Subject, HttpContext.RequestAborted);
 
             return CreatedAtAction(nameof(GetQuestion), new { id = question.Id }, MapToDto(question));
         }
@@ -122,6 +144,10 @@ namespace Application.Controllers.Support
             var managerId = AuthToken.GetID(User);
             if (!managerId.HasValue)
                 return Unauthorized();
+
+            var answerText = request.Content?.Trim() ?? "";
+            if (answerText.Length < AnswerMin || answerText.Length > AnswerMax)
+                return BadRequest(new { message = $"Ответ: от {AnswerMin} до {AnswerMax} символов." });
 
             var question = await _context.Questions
                 .FirstOrDefaultAsync(q => q.Id == questionId);
@@ -138,7 +164,7 @@ namespace Application.Controllers.Support
                 Id = Guid.NewGuid(),
                 QuestionId = questionId,
                 ManagerUserId = managerId.Value,
-                Content = request.Content,
+                Content = answerText,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -147,6 +173,8 @@ namespace Application.Controllers.Support
 
             await _context.SaveChangesAsync();
 
+            await FillAnswerAsync(question);
+            await _push.NotifySupportReplyAsync(question.UserId, question.Id, question.Subject, HttpContext.RequestAborted);
             return CreatedAtAction(nameof(GetQuestion), new { id = questionId }, MapToDto(question));
         }
 
@@ -190,6 +218,22 @@ namespace Application.Controllers.Support
             question.Answer = await _context.Answers
                 .Where(a => a.QuestionId == question.Id)
                 .FirstOrDefaultAsync();
+        }
+
+        private async Task FillAnswersAsync(List<Question> questions)
+        {
+            if (questions.Count == 0) return;
+            var ids = questions.Select(q => q.Id).ToList();
+            var answers = await _context.Answers
+                .Where(a => ids.Contains(a.QuestionId))
+                .GroupBy(a => a.QuestionId)
+                .Select(g => g.OrderByDescending(a => a.CreatedAt).First())
+                .ToListAsync();
+            var byQuestion = answers.ToDictionary(a => a.QuestionId, a => a);
+            foreach (var q in questions)
+            {
+                q.Answer = byQuestion.GetValueOrDefault(q.Id);
+            }
         }
 
         private QuestionDto MapToDto(Question question)

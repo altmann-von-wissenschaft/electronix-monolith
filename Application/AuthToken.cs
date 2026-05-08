@@ -1,12 +1,9 @@
 using System.Security.Claims;
-using System.Text;
 
 namespace Application;
 
 public class AuthToken()
 {
-    public static readonly byte[] key = Encoding.ASCII.GetBytes("7ntbLwQvepRN4X1Uv9o7m29DnPclkL7adynTm2ex");
-
     public static bool VerifyID(ClaimsPrincipal principal, Guid id)
     {
         var userIdClaim = principal.FindFirst(ClaimTypes.NameIdentifier)?.Value;

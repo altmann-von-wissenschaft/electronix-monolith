@@ -22,6 +22,7 @@ namespace Application.Controllers.Products
         public async Task<IActionResult> GetCharacteristics([FromQuery] int page = 1, [FromQuery] int pageSize = 50)
         {
             var characteristics = await _context.Characteristics
+                .AsNoTracking()
                 .OrderBy(c => c.Name)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)

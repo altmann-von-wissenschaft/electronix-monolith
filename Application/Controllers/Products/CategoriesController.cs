@@ -32,6 +32,7 @@ namespace Application.Controllers.Products
                 query = query.Where(c => c.ParentId == null);  // Top-level only
 
             var categories = await query
+                .AsNoTracking()
                 .OrderBy(c => c.DisplayOrder)
                 .ThenBy(c => c.Name)
                 .ToListAsync();
@@ -47,10 +48,12 @@ namespace Application.Controllers.Products
         public async Task<IActionResult> GetCategory(Guid id)
         {
             var category = await _context.Categories
+                .AsNoTracking()
                 .Include(c => c.Parent)
                 .Include(c => c.Children)
                 .Include(c => c.Characteristics)
                 .ThenInclude(cc => cc.Characteristic)
+                .AsSplitQuery()
                 .FirstOrDefaultAsync(c => c.Id == id);
 
             if (category == null)
@@ -82,9 +85,28 @@ namespace Application.Controllers.Products
             };
 
             _context.Categories.Add(category);
+
+            if (request.Characteristics is { Count: > 0 })
+            {
+                var err = await ApplyCategoryCharacteristicsAsync(category.Id, request.Characteristics);
+                if (err != null)
+                {
+                    return err;
+                }
+            }
+
             await _context.SaveChangesAsync();
 
-            return CreatedAtAction(nameof(GetCategory), new { id = category.Id }, MapToDto(category));
+            var created = await _context.Categories
+                .AsNoTracking()
+                .Include(c => c.Parent)
+                .Include(c => c.Children)
+                .Include(c => c.Characteristics)
+                .ThenInclude(cc => cc.Characteristic)
+                .AsSplitQuery()
+                .FirstOrDefaultAsync(c => c.Id == category.Id);
+
+            return CreatedAtAction(nameof(GetCategory), new { id = category.Id }, MapToDto(created!));
         }
 
         /// <summary>
@@ -117,71 +139,9 @@ namespace Application.Controllers.Products
 
                 if (request.Characteristics != null)
                 {
-                    var duplicateCharacteristicId = request.Characteristics
-                        .GroupBy(c => c.CharacteristicId)
-                        .FirstOrDefault(g => g.Count() > 1)?.Key;
-
-                    if (duplicateCharacteristicId.HasValue)
-                    {
-                        return BadRequest(new
-                        {
-                            message = $"Duplicate characteristicId '{duplicateCharacteristicId.Value}' in request body."
-                        });
-                    }
-
-                    var requestedCharacteristicIds = request.Characteristics
-                        .Select(c => c.CharacteristicId)
-                        .ToHashSet();
-
-                    var categoryCharacteristics = await _context.CategoryCharacteristics
-                        .Where(cc => cc.CategoryId == category.Id)
-                        .ToListAsync();
-
-                    var knownCharacteristicIds = await _context.Characteristics
-                        .Where(c => requestedCharacteristicIds.Contains(c.Id))
-                        .Select(c => c.Id)
-                        .ToListAsync();
-
-                    var missingCharacteristicIds = requestedCharacteristicIds
-                        .Except(knownCharacteristicIds)
-                        .ToList();
-
-                    if (missingCharacteristicIds.Count > 0)
-                    {
-                        return BadRequest(new
-                        {
-                            message = "Some characteristicIds were not found",
-                            characteristicIds = missingCharacteristicIds
-                        });
-                    }
-
-                    var toRemove = categoryCharacteristics
-                        .Where(cc => !requestedCharacteristicIds.Contains(cc.CharacteristicId))
-                        .ToList();
-
-                    if (toRemove.Count > 0)
-                        _context.CategoryCharacteristics.RemoveRange(toRemove);
-
-                    foreach (var requestCharacteristic in request.Characteristics)
-                    {
-                        var existing = categoryCharacteristics
-                            .FirstOrDefault(cc => cc.CharacteristicId == requestCharacteristic.CharacteristicId);
-
-                        if (existing == null)
-                        {
-                            _context.CategoryCharacteristics.Add(new CategoryCharacteristic
-                            {
-                                Id = Guid.NewGuid(),
-                                CategoryId = category.Id,
-                                CharacteristicId = requestCharacteristic.CharacteristicId,
-                                IsRequired = requestCharacteristic.IsRequired
-                            });
-                        }
-                        else
-                        {
-                            existing.IsRequired = requestCharacteristic.IsRequired;
-                        }
-                    }
+                    var err = await ApplyCategoryCharacteristicsAsync(category.Id, request.Characteristics);
+                    if (err != null)
+                        return err;
                 }
 
                 await _context.SaveChangesAsync();
@@ -204,6 +164,7 @@ namespace Application.Controllers.Products
                 .Include(c => c.Children)
                 .Include(c => c.Characteristics)
                 .ThenInclude(cc => cc.Characteristic)
+                .AsSplitQuery()
                 .FirstOrDefaultAsync(c => c.Id == id);
 
             if (updatedCategory == null)
@@ -222,6 +183,7 @@ namespace Application.Controllers.Products
             var category = await _context.Categories
                 .Include(c => c.Products)
                 .Include(c => c.Children)
+                .AsSplitQuery()
                 .FirstOrDefaultAsync(c => c.Id == id);
 
             if (category == null)
@@ -234,6 +196,79 @@ namespace Application.Controllers.Products
             await _context.SaveChangesAsync();
 
             return Ok(new { message = "Category deleted" });
+        }
+
+        private async Task<IActionResult?> ApplyCategoryCharacteristicsAsync(
+            Guid categoryId,
+            List<AssignCharacteristicRequest> characteristics)
+        {
+            var duplicateCharacteristicId = characteristics
+                .GroupBy(c => c.CharacteristicId)
+                .FirstOrDefault(g => g.Count() > 1)?.Key;
+
+            if (duplicateCharacteristicId.HasValue)
+            {
+                return BadRequest(new
+                {
+                    message = $"Duplicate characteristicId '{duplicateCharacteristicId.Value}' in request body."
+                });
+            }
+
+            var requestedCharacteristicIds = characteristics
+                .Select(c => c.CharacteristicId)
+                .ToHashSet();
+
+            var categoryCharacteristics = await _context.CategoryCharacteristics
+                .Where(cc => cc.CategoryId == categoryId)
+                .ToListAsync();
+
+            var knownCharacteristicIds = await _context.Characteristics
+                .Where(c => requestedCharacteristicIds.Contains(c.Id))
+                .Select(c => c.Id)
+                .ToListAsync();
+
+            var missingCharacteristicIds = requestedCharacteristicIds
+                .Except(knownCharacteristicIds)
+                .ToList();
+
+            if (missingCharacteristicIds.Count > 0)
+            {
+                return BadRequest(new
+                {
+                    message = "Some characteristicIds were not found",
+                    characteristicIds = missingCharacteristicIds
+                });
+            }
+
+            var toRemove = categoryCharacteristics
+                .Where(cc => !requestedCharacteristicIds.Contains(cc.CharacteristicId))
+                .ToList();
+
+            if (toRemove.Count > 0)
+                _context.CategoryCharacteristics.RemoveRange(toRemove);
+
+            foreach (var requestCharacteristic in characteristics)
+            {
+                var existing = categoryCharacteristics
+                    .FirstOrDefault(cc => cc.CharacteristicId == requestCharacteristic.CharacteristicId);
+
+                if (existing == null)
+                {
+                    _context.CategoryCharacteristics.Add(new CategoryCharacteristic
+                    {
+                        Id = Guid.NewGuid(),
+                        CategoryId = categoryId,
+                        CharacteristicId = requestCharacteristic.CharacteristicId,
+                        IsRequired = requestCharacteristic.IsRequired
+                    });
+                }
+                else
+                {
+                    existing.IsRequired = requestCharacteristic.IsRequired;
+                }
+            }
+
+            return null;
         }
 
         private CategoryDto MapToDto(Category category)

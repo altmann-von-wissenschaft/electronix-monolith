@@ -100,18 +100,26 @@ public class ValidationTests
     }
 
     [Fact]
-    public void ProductAttribute_ShouldHaveKeyAndValue()
+    public void ProductCharacteristicValue_ShouldHaveCharacteristicAndValue()
     {
         // Arrange & Act
-        var attr = new ProductAttribute
+        var characteristicId = Guid.NewGuid();
+        var value = new ProductCharacteristicValue
         {
-            Name = "Material",
-            Value = "Cotton"
+            CharacteristicId = characteristicId,
+            Value = 100,
+            Characteristic = new Characteristic
+            {
+                Id = characteristicId,
+                Name = "Battery capacity",
+                Unit = "mAh",
+            },
         };
 
         // Assert
-        attr.Name.Should().NotBeNullOrEmpty();
-        attr.Value.Should().NotBeNullOrEmpty();
+        value.Characteristic.Name.Should().NotBeNullOrEmpty();
+        value.Characteristic.Unit.Should().NotBeNullOrEmpty();
+        value.Value.Should().BeGreaterThan(0);
     }
 
     [Fact]

@@ -1,5 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Text;
+using Application;
 using Infrastructure.Contexts;
 using Domain.Users;
 using Microsoft.EntityFrameworkCore;
@@ -10,13 +12,15 @@ namespace Application.Services;
 public class AuthService
 {
     private readonly UsersDbContext _context;
+    private readonly JwtOptions _jwt;
     private readonly SymmetricSecurityKey _key;
     private readonly SigningCredentials _credentials;
 
-    public AuthService(UsersDbContext context)
+    public AuthService(UsersDbContext context, JwtOptions jwtOptions)
     {
         _context = context;
-        _key = new SymmetricSecurityKey(AuthToken.key);
+        _jwt = jwtOptions;
+        _key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.SecretKey));
         _credentials = new SigningCredentials(_key, SecurityAlgorithms.HmacSha256);
     }
 
@@ -76,10 +80,10 @@ public class AuthService
         claims.Add(new Claim("hierarchy", highestHierarchy.ToString()));
 
         var token = new JwtSecurityToken(
-            issuer: null,
-            audience: null,
+            issuer: _jwt.Issuer,
+            audience: _jwt.Audience,
             claims: claims,
-            expires: DateTime.UtcNow.AddHours(24),
+            expires: DateTime.UtcNow.AddDays(_jwt.AccessTokenLifetimeDays),
             signingCredentials: _credentials
         );
 

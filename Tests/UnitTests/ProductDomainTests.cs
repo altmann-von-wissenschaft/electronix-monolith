@@ -18,7 +18,7 @@ public class ProductDomainTests
         product.Name.Should().BeNullOrEmpty();
         product.Price.Should().Be(0);
         product.Stock.Should().Be(0);
-        product.Attributes.Should().BeEmpty();
+        product.CharacteristicValues.Should().BeEmpty();
         product.Images.Should().BeEmpty();
     }
 
@@ -51,25 +51,32 @@ public class ProductDomainTests
     }
 
     [Fact]
-    public void Product_ShouldAddAttributes()
+    public void Product_ShouldAddCharacteristicValues()
     {
         // Arrange
         var product = new Product { Id = Guid.NewGuid(), Name = "Test" };
-        var attribute = new ProductAttribute
+        var characteristicId = Guid.NewGuid();
+        var characteristicValue = new ProductCharacteristicValue
         {
             Id = Guid.NewGuid(),
             ProductId = product.Id,
-            Name = "Color",
-            Value = "Red"
+            CharacteristicId = characteristicId,
+            Value = 42.5,
+            Characteristic = new Characteristic
+            {
+                Id = characteristicId,
+                Name = "Power",
+                Unit = "W",
+            },
         };
 
         // Act
-        product.Attributes.Add(attribute);
+        product.CharacteristicValues.Add(characteristicValue);
 
         // Assert
-        product.Attributes.Should().HaveCount(1);
-        product.Attributes.First().Name.Should().Be("Color");
-        product.Attributes.First().Value.Should().Be("Red");
+        product.CharacteristicValues.Should().HaveCount(1);
+        product.CharacteristicValues.First().Characteristic.Name.Should().Be("Power");
+        product.CharacteristicValues.First().Value.Should().Be(42.5);
     }
 
     [Fact]
@@ -120,19 +127,27 @@ public class ProductDomainTests
     }
 
     [Fact]
-    public void ProductAttribute_ShouldStoreKeyValuePairs()
+    public void ProductCharacteristicValue_ShouldStoreValueWithCharacteristic()
     {
         // Arrange & Act
-        var attribute = new ProductAttribute
+        var characteristicId = Guid.NewGuid();
+        var value = new ProductCharacteristicValue
         {
             Id = Guid.NewGuid(),
-            Name = "Size",
-            Value = "Large"
+            CharacteristicId = characteristicId,
+            Value = 15.7,
+            Characteristic = new Characteristic
+            {
+                Id = characteristicId,
+                Name = "Weight",
+                Unit = "kg",
+            },
         };
 
         // Assert
-        attribute.Name.Should().Be("Size");
-        attribute.Value.Should().Be("Large");
+        value.Characteristic.Name.Should().Be("Weight");
+        value.Characteristic.Unit.Should().Be("kg");
+        value.Value.Should().Be(15.7);
     }
 
     [Fact]

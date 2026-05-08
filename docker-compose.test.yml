@@ -6,8 +6,11 @@ services:
       dockerfile: Application/Dockerfile
     environment:
       - ASPNETCORE_ENVIRONMENT=Testing
+      - Firebase__CredentialsPath=/app/firebase/adminsdk.json
     ports:
       - "8080:80"
+    volumes:
+      - ./adminsdk.json:/app/firebase/adminsdk.json:ro
     depends_on:
       postgres-test:
         condition: service_healthy

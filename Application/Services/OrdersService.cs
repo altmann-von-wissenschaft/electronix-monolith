@@ -7,17 +7,19 @@ public class OrdersService
 {
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<OrdersService> _logger;
 
-    public OrdersService(HttpClient httpClient, IConfiguration configuration)
+    public OrdersService(HttpClient httpClient, IConfiguration configuration, ILogger<OrdersService> logger)
     {
         _httpClient = httpClient;
         _configuration = configuration;
+        _logger = logger;
     }
 
     private string GetOrdersUrl() => _configuration["ServiceUrls:Orders"] ?? "http://localhost:80";
 
     /// <summary>
-    /// Create order from cart items
+    /// Create order from cart items (legacy HTTP integration — no in-repo callers; endpoint may not exist on monolith).
     /// </summary>
     public async Task<OrderResponse?> CreateOrderAsync(Guid userId, List<CartItemForOrder> items)
     {
@@ -29,7 +31,8 @@ public class OrdersService
                 System.Text.Encoding.UTF8,
                 "application/json");
 
-            var response = await _httpClient.PostAsync($"{GetOrdersUrl()}/api/orders/internal", content);
+            var url = InterServiceUrl.Combine(GetOrdersUrl(), "api/orders", "internal");
+            var response = await _httpClient.PostAsync(url, content);
             if (response.IsSuccessStatusCode)
             {
                 var json = await response.Content.ReadAsStringAsync();
@@ -38,8 +41,9 @@ public class OrdersService
             }
             return null;
         }
-        catch
+        catch (Exception ex)
         {
+            _logger.LogWarning(ex, "Orders HTTP POST internal failed for user {UserId}", userId);
             return null;
         }
     }

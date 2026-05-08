@@ -10,6 +10,8 @@ public class UsersDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
+    public DbSet<FcmDeviceRegistration> FcmDeviceRegistrations => Set<FcmDeviceRegistration>();
+    public DbSet<UserPushPreferences> UserPushPreferences => Set<UserPushPreferences>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -47,6 +49,26 @@ public class UsersDbContext : DbContext
             e.HasOne(x => x.Role)
                 .WithMany(x => x.UserRoles)
                 .HasForeignKey(x => x.RoleId);
+        });
+
+        modelBuilder.Entity<FcmDeviceRegistration>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.HasIndex(x => x.Token).IsUnique();
+            e.Property(x => x.Token).IsRequired().HasMaxLength(512);
+            e.HasOne(x => x.User)
+                .WithMany(x => x.FcmRegistrations)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserPushPreferences>(e =>
+        {
+            e.HasKey(x => x.UserId);
+            e.HasOne(x => x.User)
+                .WithOne(x => x.PushPreferences)
+                .HasForeignKey<UserPushPreferences>(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Seed default roles
